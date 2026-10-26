@@ -17,3 +17,24 @@ export const paginationShape = {
 export function parseQuery(schema, request) {
   return schema.parse(Object.fromEntries(new URL(request.url).searchParams));
 }
+
+export function idParam(name) {
+  return z.coerce
+    .number({ error: `${name} harus berupa angka.` })
+    .int(`${name} harus bilangan bulat.`)
+    .min(1, `${name} harus lebih dari 0.`)
+    .max(2147483647, `${name} terlalu besar.`);
+}
+
+export async function parseParams(schema, context) {
+  return schema.parse(await context.params);
+}
+
+export function optionalText(max, label) {
+  return z
+    .string({ error: `${label} harus berupa teks.` })
+    .trim()
+    .max(max, `${label} maksimal ${max} karakter.`)
+    .nullish()
+    .transform((value) => value || null);
+}
