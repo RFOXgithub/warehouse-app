@@ -1,0 +1,7 @@
+# Simpan file teks dengan akhir baris LF, karena banyak yang dibaca Linux/Docker
+# (docker-compose.yml, .sql, Dockerfile, script shell).
+* text=auto eol=lf
+
+# File khusus Windows tetap CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
