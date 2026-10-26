@@ -7,9 +7,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "migrate": "node --env-file-if-exists=.env.local scripts/migrate.js",
+    "seed": "node --env-file-if-exists=.env.local scripts/seed.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "next": "16.4.3",
     "pg": "^8.23.1",
     "react": "19.3.0",
