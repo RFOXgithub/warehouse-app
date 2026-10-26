@@ -963,6 +963,8 @@ docker compose up --build
 
 Endpoint ini tidak butuh token, dan dipakai oleh healthcheck Docker.
 
+Pool database memakai `connectionTimeoutMillis: 5000`. Tanpa batas ini (bawaan `pg` = 0, artinya menunggu selamanya), health check akan menggantung saat database tidak bisa dijangkau, bukan menjawab 503.
+
 ### 10.4 Alur development (tanpa build Docker)
 
 Saat menulis kode, hanya database yang berjalan di Docker. Backend dan frontend dijalankan langsung supaya perubahan kode langsung terlihat.

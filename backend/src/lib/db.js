@@ -7,7 +7,10 @@ types.setTypeParser(1082, (value) => value);
 
 export function getPool() {
   if (!globalThis.pgPool) {
-    globalThis.pgPool = new Pool({ connectionString: getConfig().databaseUrl });
+    globalThis.pgPool = new Pool({
+      connectionString: getConfig().databaseUrl,
+      connectionTimeoutMillis: 5000,
+    });
   }
   return globalThis.pgPool;
 }
