@@ -1,0 +1,54 @@
+%% Diagram B — Data per aksi (tabel yang dibaca/ditulis). Penjelasan: technical-spec.md bagian 5.2
+
+flowchart LR
+    subgraph AKSI [Aksi]
+        L([Login])
+        P([Tambah produk<br/>1 transaksi])
+        D([Buat dokumen · kelola item<br/>submit · complete · cancel<br/>1 transaksi + kunci dokumen])
+        R([CATAT PENERIMAAN<br/>1 transaksi + kunci dokumen])
+        V1([Lihat produk & dokumen])
+        V2([Lihat stok & riwayat])
+    end
+
+    subgraph TABEL [Tabel PostgreSQL]
+        users[(users)]
+        products[(products)]
+        docs[(receiving_documents)]
+        items[(receiving_items)]
+        receipts[(receipts)]
+        bal[(inventory_balances)]
+        trx[(inventory_transactions)]
+    end
+
+    L -.->|cek password| users
+
+    P -->|produk baru| products
+    P -->|baris stok 0| bal
+
+    D -.->|produk ada?| products
+    D -->|status, siapa, kapan| docs
+    D -->|tambah/ubah/hapus item| items
+    D -.->|complete: semua penuh?| items
+
+    R -->|kunci; OPEN → IN_PROGRESS| docs
+    R -.->|Idempotency-Key sudah ada?| receipts
+    R -->|receipt baru| receipts
+    R -.->|sisa cukup?| items
+    R -->|received_qty + jumlah| items
+    R -->|on_hand_qty + jumlah| bal
+    R -->|1 baris per barang| trx
+
+    V1 -.-> products
+    V1 -.-> docs
+    V1 -.-> items
+    V1 -.-> receipts
+    V1 -.->|nama user| users
+
+    V2 -.-> bal
+    V2 -.-> trx
+    V2 -.-> products
+
+    classDef stock fill:#fde68a,stroke:#b45309,color:#000
+    classDef core stroke-width:3px,font-weight:bold
+    class bal,trx stock
+    class R core

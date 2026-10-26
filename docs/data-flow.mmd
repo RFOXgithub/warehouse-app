@@ -1,0 +1,45 @@
+%% Diagram A — Komponen & jalur request. Penjelasan: technical-spec.md bagian 5.1
+
+flowchart TD
+    subgraph BR [Browser]
+        V[Halaman Vue<br/>H1–H6]
+        C[api/client.js<br/>• tambah token Authorization<br/>• tambah Idempotency-Key<br/>• ubah error jadi code/message/details]
+        LS[(localStorage<br/>token)]
+    end
+
+    subgraph FE [Container frontend · :8080]
+        NG[Nginx]
+        ST[/File statis Vue<br/>HTML · JS · CSS/]
+    end
+
+    DEV[Mode development:<br/>Vite :5173 menggantikan Nginx<br/>proxy /api → localhost:3000]
+
+    subgraph BE [Container backend · :3000 internal]
+        H["lib/http.js · handle()<br/>membungkus SETIAP route<br/>• hasil → JSON data<br/>• AppError → JSON error<br/>• error lain → 500"]
+        RH[route.js<br/>① requireUser: cek tanda tangan JWT,<br/>tanpa query database → 401/403<br/>② validasi zod → 400]
+        SV[service<br/>③ BEGIN + kunci dokumen FOR UPDATE → 404<br/>④ khusus penerimaan: cek Idempotency-Key<br/>→ 200 receipt lama / 409<br/>⑤ cek status → 409<br/>⑥ cek aturan bisnis → 422<br/>⑦ tulis data + COMMIT → 201 / 200]
+    end
+
+    subgraph DB [Container db · 127.0.0.1:5432]
+        PG[(PostgreSQL<br/>detail tabel: Diagram B)]
+    end
+
+    V -->|1. buka aplikasi| NG
+    NG -->|sajikan| ST
+    ST -->|HTML · JS · CSS| V
+    V -->|2. aksi pengguna| C
+    C <-->|simpan saat login,<br/>baca setiap request| LS
+    C -->|3. HTTP JSON /api/*| NG
+    NG -->|proxy /api/*| H
+    H -->|panggil| RH
+    RH -->|panggil| SV
+    SV <-->|SQL berparameter| PG
+    SV -.->|hasil / AppError| RH
+    RH -.->|hasil / AppError| H
+    H -->|JSON data / error| NG
+    NG -->|respons| C
+    C -->|tampilkan data<br/>atau error per field/baris| V
+    DEV -.-|menggantikan saat development| NG
+
+    classDef note fill:#f1f5f9,stroke:#94a3b8,color:#334155,stroke-dasharray:4 3
+    class DEV note

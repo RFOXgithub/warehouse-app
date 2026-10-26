@@ -1,0 +1,1209 @@
+openapi: 3.1.0
+info:
+  title: Warehouse Receiving System API
+  version: 0.2.0
+  description: |
+    REST API untuk pencatatan penerimaan barang gudang.
+    Aturan lengkap ada di `prd.md` dan `technical-spec.md`.
+
+    **Aturan umum**
+    - Semua field memakai `snake_case`.
+    - Semua endpoint kecuali `/health` dan `/auth/login` membutuhkan header `Authorization: Bearer <token>`.
+    - Teks dipangkas spasinya di awal/akhir **sebelum** divalidasi. Pola dan panjang di skema berlaku untuk teks yang sudah dipangkas.
+    - Field yang tidak dikenal di body request **ditolak** dengan `400 VALIDATION_ERROR`.
+    - Parameter path `{id}` dan `{itemId}` harus bilangan bulat positif. Selain itu → `400 VALIDATION_ERROR`.
+    - Urutan pengecekan error: 401 → 403 → 400 → 404 → 409 → 422.
+    - Error tak terduga → `500 INTERNAL_ERROR` dengan pesan umum; detail hanya di log server.
+servers:
+  - url: http://localhost:8080/api
+    description: Lewat Nginx (Docker Compose)
+  - url: http://localhost:3000/api
+    description: Backend langsung (development)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: System
+  - name: Auth
+  - name: Products
+  - name: Receiving Documents
+  - name: Receipts
+  - name: Inventory
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      operationId: getHealth
+      summary: Cek aplikasi dan database (FR-50)
+      description: Semua kegagalan, termasuk error tak terduga, dilaporkan sebagai 503.
+      security: []
+      responses:
+        '200':
+          description: Aplikasi dan database normal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              example: { status: ok, database: ok }
+        '503':
+          description: Database tidak bisa diakses
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              example: { status: error, database: error }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Login (FR-01)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+            example: { username: operator1, password: rahasia123 }
+      responses:
+        '200':
+          description: Login berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/LoginResult' }
+              example:
+                data:
+                  token: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIyIn0.contoh
+                  expires_at: '2026-10-26T09:00:00.000Z'
+                  user: { id: 2, username: operator1, full_name: Operator Satu, role: OPERATOR }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: Username atau password salah (`INVALID_CREDENTIALS`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: { code: INVALID_CREDENTIALS, message: Username atau password salah. }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      summary: Data pengguna dari token
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+              example:
+                data: { id: 2, username: operator1, full_name: Operator Satu, role: OPERATOR }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /products:
+    get:
+      tags: [Products]
+      operationId: listProducts
+      summary: Daftar produk, urut SKU (FR-10, FR-11)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: q
+          in: query
+          description: Cari sebagian SKU atau nama (tidak membedakan huruf besar/kecil)
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Product' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+              example:
+                data:
+                  - { id: 3, sku: FZ-BKS-003, name: Bakso Sapi, unit: KARTON, created_at: '2026-10-25T02:00:00.000Z' }
+                  - { id: 1, sku: FZ-CHK-001, name: Ayam Fillet, unit: KARTON, created_at: '2026-10-25T02:00:00.000Z' }
+                  - { id: 2, sku: FZ-SHR-002, name: Udang Kupas, unit: KARTON, created_at: '2026-10-25T02:00:00.000Z' }
+                pagination: { page: 1, page_size: 20, total: 3, total_pages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Products]
+      operationId: createProduct
+      summary: Tambah produk — Supervisor (FR-12)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductCreate' }
+            example: { sku: fz-chk-001, name: Ayam Fillet, unit: KARTON }
+      responses:
+        '201':
+          description: Produk dibuat (SKU disimpan huruf besar, stok awal 0)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Product' }
+              example:
+                data: { id: 1, sku: FZ-CHK-001, name: Ayam Fillet, unit: KARTON, created_at: '2026-10-25T02:00:00.000Z' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: SKU sudah dipakai (`SKU_ALREADY_EXISTS`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: { code: SKU_ALREADY_EXISTS, message: SKU FZ-CHK-001 sudah digunakan. }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /receiving-documents:
+    get:
+      tags: [Receiving Documents]
+      operationId: listReceivingDocuments
+      summary: Daftar dokumen, terbaru di atas (FR-20 – FR-22)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/DocumentStatus' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/DocumentSummary' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+              example:
+                data:
+                  - id: 15
+                    doc_number: RCV-20261026-000015
+                    supplier_name: PT Sumber Beku
+                    expected_date: '2026-10-27'
+                    status: IN_PROGRESS
+                    item_count: 3
+                    total_expected: 170
+                    total_received: 110
+                    created_at: '2026-10-26T01:00:00.000Z'
+                pagination: { page: 1, page_size: 20, total: 1, total_pages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    post:
+      tags: [Receiving Documents]
+      operationId: createReceivingDocument
+      summary: Buat dokumen, status awal DRAFT (FR-23, FR-24)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DocumentCreate' }
+            example: { supplier_name: PT Sumber Beku, expected_date: '2026-10-27', notes: Kiriman mingguan }
+      responses:
+        '201':
+          description: Dokumen dibuat
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/DocumentDetail' }
+              example:
+                data:
+                  id: 15
+                  doc_number: RCV-20261026-000015
+                  supplier_name: PT Sumber Beku
+                  expected_date: '2026-10-27'
+                  notes: Kiriman mingguan
+                  status: DRAFT
+                  created_by: { id: 2, full_name: Operator Satu }
+                  created_at: '2026-10-26T01:00:00.000Z'
+                  submitted_by: null
+                  submitted_at: null
+                  completed_by: null
+                  completed_at: null
+                  cancelled_by: null
+                  cancelled_at: null
+                  cancel_reason: null
+                  items: []
+                  receipts: []
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /receiving-documents/{id}:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    get:
+      tags: [Receiving Documents]
+      operationId: getReceivingDocument
+      summary: Detail dokumen beserta item dan receipt (FR-25)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/DocumentDetail' }
+              examples:
+                inProgress: { $ref: '#/components/examples/DocumentInProgress' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /receiving-documents/{id}/items:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    post:
+      tags: [Receiving Documents]
+      operationId: addReceivingItem
+      summary: Tambah item — hanya saat DRAFT (FR-26)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ItemCreate' }
+            example: { product_id: 1, expected_qty: 100 }
+      responses:
+        '201':
+          description: Item ditambahkan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Item' }
+              example:
+                data: { id: 101, product_id: 1, sku: FZ-CHK-001, product_name: Ayam Fillet, unit: KARTON, expected_qty: 100, received_qty: 0, remaining_qty: 100 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Dokumen bukan DRAFT (`INVALID_DOCUMENT_STATUS`) atau produk sudah ada (`PRODUCT_ALREADY_IN_DOCUMENT`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: { code: PRODUCT_ALREADY_IN_DOCUMENT, message: Produk FZ-CHK-001 sudah ada di dokumen ini. }
+        '422':
+          description: Produk tidak ada (`PRODUCT_NOT_FOUND`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /receiving-documents/{id}/items/{itemId}:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+      - $ref: '#/components/parameters/ItemId'
+    patch:
+      tags: [Receiving Documents]
+      operationId: updateReceivingItem
+      summary: Ubah jumlah diharapkan — hanya saat DRAFT (FR-26)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ItemUpdate' }
+            example: { expected_qty: 120 }
+      responses:
+        '200':
+          description: Item diperbarui
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Item' }
+              example:
+                data: { id: 101, product_id: 1, sku: FZ-CHK-001, product_name: Ayam Fillet, unit: KARTON, expected_qty: 120, received_qty: 0, remaining_qty: 120 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidStatus' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [Receiving Documents]
+      operationId: deleteReceivingItem
+      summary: Hapus item — hanya saat DRAFT (FR-26)
+      responses:
+        '204':
+          description: Item dihapus
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidStatus' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /receiving-documents/{id}/submit:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    post:
+      tags: [Receiving Documents]
+      operationId: submitReceivingDocument
+      summary: DRAFT → OPEN (FR-27, BR-04)
+      responses:
+        '200':
+          description: Dokumen menjadi OPEN
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/DocumentDetail' }
+              examples:
+                open: { $ref: '#/components/examples/DocumentOpen' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidStatus' }
+        '422':
+          description: Dokumen belum punya item (`DOCUMENT_HAS_NO_ITEMS`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: { code: DOCUMENT_HAS_NO_ITEMS, message: Dokumen harus memiliki minimal 1 item. }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /receiving-documents/{id}/receipts:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    post:
+      tags: [Receipts]
+      operationId: createReceipt
+      summary: Catat penerimaan satu kedatangan (FR-30 – FR-33)
+      description: |
+        Semua baris diproses sekaligus: berhasil semua atau ditolak semua (BR-06).
+        Request dengan `Idempotency-Key` yang sama dan isi yang sama mengembalikan receipt lama
+        (200 + header `Idempotent-Replayed: true`) tanpa mengubah stok, meskipun status dokumen sudah berubah.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReceiptCreate' }
+            example:
+              notes: Truk B 1234 XY
+              lines:
+                - { item_id: 101, quantity: 60 }
+                - { item_id: 102, quantity: 50 }
+      responses:
+        '201':
+          description: Receipt baru dibuat, stok bertambah
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Receipt' }
+              examples:
+                created: { $ref: '#/components/examples/ReceiptCreated' }
+        '200':
+          description: Request ulang (key dan isi sama). Receipt lama dikembalikan, stok tidak berubah
+          headers:
+            Idempotent-Replayed:
+              schema: { type: string, enum: ['true'] }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/Receipt' }
+              examples:
+                replayed: { $ref: '#/components/examples/ReceiptCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Status bukan OPEN/IN_PROGRESS (`INVALID_DOCUMENT_STATUS`) atau key dipakai dengan isi berbeda (`IDEMPOTENCY_KEY_CONFLICT`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: { code: IDEMPOTENCY_KEY_CONFLICT, message: Idempotency-Key ini sudah dipakai untuk isi penerimaan yang berbeda. }
+        '422':
+          description: |
+            Ada baris yang melebihi sisa (`QUANTITY_EXCEEDS_REMAINING`) atau item bukan milik dokumen (`ITEM_NOT_IN_DOCUMENT`).
+            Semua baris yang salah dilaporkan di `details` (skema `LineErrorDetail`).
+            Jika kedua jenis error muncul bersamaan, `code` yang dipakai adalah `ITEM_NOT_IN_DOCUMENT`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                exceedsRemaining:
+                  summary: Melebihi sisa
+                  value:
+                    error:
+                      code: QUANTITY_EXCEEDS_REMAINING
+                      message: Jumlah yang diterima melebihi sisa pada 1 baris.
+                      details:
+                        - line: 2
+                          item_id: 103
+                          sku: FZ-BKS-003
+                          remaining: 20
+                          requested: 25
+                          message: 'Bakso Sapi: maksimal 20, diminta 25.'
+                itemNotInDocument:
+                  summary: Item bukan milik dokumen
+                  value:
+                    error:
+                      code: ITEM_NOT_IN_DOCUMENT
+                      message: Ada item yang bukan milik dokumen ini.
+                      details:
+                        - line: 1
+                          item_id: 999
+                          message: Item 999 tidak ada di dokumen ini.
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /receiving-documents/{id}/complete:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    post:
+      tags: [Receiving Documents]
+      operationId: completeReceivingDocument
+      summary: IN_PROGRESS → COMPLETED — Supervisor (FR-27, BR-02)
+      responses:
+        '200':
+          description: Dokumen selesai. Bentuknya sama dengan detail dokumen, dengan `status` COMPLETED serta `completed_by`/`completed_at` terisi
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/DocumentDetail' }
+              examples:
+                completed: { $ref: '#/components/examples/DocumentCompleted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidStatus' }
+        '422':
+          description: Masih ada item yang belum penuh (`DOCUMENT_NOT_FULLY_RECEIVED`). `details` berisi item yang kurang (skema `ItemShortageDetail`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error:
+                  code: DOCUMENT_NOT_FULLY_RECEIVED
+                  message: Masih ada 1 item yang belum diterima penuh.
+                  details:
+                    - item_id: 103
+                      sku: FZ-BKS-003
+                      expected_qty: 20
+                      received_qty: 0
+                      remaining_qty: 20
+                      message: 'Bakso Sapi: kurang 20.'
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /receiving-documents/{id}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    post:
+      tags: [Receiving Documents]
+      operationId: cancelReceivingDocument
+      summary: DRAFT/OPEN → CANCELLED — Supervisor (FR-28)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelRequest' }
+            example: { reason: Supplier membatalkan kiriman }
+      responses:
+        '200':
+          description: Dokumen dibatalkan. Bentuknya sama dengan detail dokumen, dengan `status` CANCELLED serta `cancelled_by`/`cancelled_at`/`cancel_reason` terisi
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/DocumentDetail' }
+              examples:
+                cancelled: { $ref: '#/components/examples/DocumentCancelled' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InvalidStatus' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /inventory:
+    get:
+      tags: [Inventory]
+      operationId: listInventory
+      summary: Daftar stok per produk, urut SKU (FR-40)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/InventoryBalance' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+              example:
+                data:
+                  - { product_id: 3, sku: FZ-BKS-003, name: Bakso Sapi, unit: KARTON, on_hand_qty: 0, updated_at: '2026-10-25T02:00:00.000Z' }
+                  - { product_id: 1, sku: FZ-CHK-001, name: Ayam Fillet, unit: KARTON, on_hand_qty: 60, updated_at: '2026-10-26T03:15:00.000Z' }
+                  - { product_id: 2, sku: FZ-SHR-002, name: Udang Kupas, unit: KARTON, on_hand_qty: 50, updated_at: '2026-10-26T03:15:00.000Z' }
+                pagination: { page: 1, page_size: 20, total: 3, total_pages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /inventory/transactions:
+    get:
+      tags: [Inventory]
+      operationId: listInventoryTransactions
+      summary: Riwayat transaksi stok, terbaru di atas (FR-41, FR-42)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: product_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/InventoryTransaction' }
+                  pagination: { $ref: '#/components/schemas/Pagination' }
+              example:
+                data:
+                  - id: 2
+                    created_at: '2026-10-26T03:15:00.000Z'
+                    product_id: 2
+                    sku: FZ-SHR-002
+                    product_name: Udang Kupas
+                    type: RECEIPT
+                    quantity: 50
+                    balance_after: 50
+                    receipt_number: GR-20261026-000001
+                    doc_number: RCV-20261026-000015
+                    created_by: { id: 2, full_name: Operator Satu }
+                  - id: 1
+                    created_at: '2026-10-26T03:15:00.000Z'
+                    product_id: 1
+                    sku: FZ-CHK-001
+                    product_name: Ayam Fillet
+                    type: RECEIPT
+                    quantity: 60
+                    balance_after: 60
+                    receipt_number: GR-20261026-000001
+                    doc_number: RCV-20261026-000015
+                    created_by: { id: 2, full_name: Operator Satu }
+                pagination: { page: 1, page_size: 20, total: 2, total_pages: 1 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    DocumentId:
+      name: id
+      in: path
+      required: true
+      description: Bilangan bulat positif. Selain itu → 400 `VALIDATION_ERROR`
+      schema: { type: integer, minimum: 1 }
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      description: Bilangan bulat positif. Item harus milik dokumen `{id}`, jika tidak → 404 `ITEM_NOT_FOUND`
+      schema: { type: integer, minimum: 1 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Kode unik per konfirmasi (disarankan UUID). Dipakai ulang saat mengirim ulang konfirmasi yang sama
+      schema: { type: string, minLength: 8, maxLength: 100 }
+
+  responses:
+    BadRequest:
+      description: |
+        Format request tidak valid (`VALIDATION_ERROR`): body, query, header, parameter path,
+        atau ada field yang tidak dikenal. `details` berisi `FieldErrorDetail`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Data yang dikirim tidak valid.
+              details:
+                - { field: lines.0.quantity, message: Harus bilangan bulat minimal 1. }
+                - { field: harga, message: Field tidak dikenal. }
+    Unauthorized:
+      description: Token tidak ada, tidak valid, atau kedaluwarsa (`UNAUTHENTICATED`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: UNAUTHENTICATED, message: Silakan login terlebih dahulu. }
+    Forbidden:
+      description: Role tidak diizinkan (`FORBIDDEN`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: FORBIDDEN, message: Aksi ini hanya untuk Supervisor. }
+    NotFound:
+      description: Dokumen (`DOCUMENT_NOT_FOUND`) atau item (`ITEM_NOT_FOUND`) tidak ditemukan
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: DOCUMENT_NOT_FOUND, message: Dokumen 999 tidak ditemukan. }
+    InvalidStatus:
+      description: Aksi tidak diizinkan pada status dokumen saat ini (`INVALID_DOCUMENT_STATUS`)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error:
+              code: INVALID_DOCUMENT_STATUS
+              message: Aksi ini hanya bisa dilakukan saat dokumen berstatus DRAFT.
+    InternalError:
+      description: Error tak terduga (`INTERNAL_ERROR`). Pesan selalu umum; detail hanya di log server (NFR-05)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: { code: INTERNAL_ERROR, message: Terjadi kesalahan pada server. Silakan coba lagi. }
+
+  examples:
+    DocumentOpen:
+      summary: Dokumen OPEN dengan 3 item, belum ada penerimaan
+      value:
+        data:
+          id: 15
+          doc_number: RCV-20261026-000015
+          supplier_name: PT Sumber Beku
+          expected_date: '2026-10-27'
+          notes: Kiriman mingguan
+          status: OPEN
+          created_by: { id: 2, full_name: Operator Satu }
+          created_at: '2026-10-26T01:00:00.000Z'
+          submitted_by: { id: 2, full_name: Operator Satu }
+          submitted_at: '2026-10-26T01:20:00.000Z'
+          completed_by: null
+          completed_at: null
+          cancelled_by: null
+          cancelled_at: null
+          cancel_reason: null
+          items:
+            - { id: 101, product_id: 1, sku: FZ-CHK-001, product_name: Ayam Fillet, unit: KARTON, expected_qty: 100, received_qty: 0, remaining_qty: 100 }
+            - { id: 102, product_id: 2, sku: FZ-SHR-002, product_name: Udang Kupas, unit: KARTON, expected_qty: 50, received_qty: 0, remaining_qty: 50 }
+            - { id: 103, product_id: 3, sku: FZ-BKS-003, product_name: Bakso Sapi, unit: KARTON, expected_qty: 20, received_qty: 0, remaining_qty: 20 }
+          receipts: []
+    DocumentInProgress:
+      summary: Dokumen IN_PROGRESS setelah satu kali penerimaan (Ayam 60, Udang 50)
+      value:
+        data:
+          id: 15
+          doc_number: RCV-20261026-000015
+          supplier_name: PT Sumber Beku
+          expected_date: '2026-10-27'
+          notes: Kiriman mingguan
+          status: IN_PROGRESS
+          created_by: { id: 2, full_name: Operator Satu }
+          created_at: '2026-10-26T01:00:00.000Z'
+          submitted_by: { id: 2, full_name: Operator Satu }
+          submitted_at: '2026-10-26T01:20:00.000Z'
+          completed_by: null
+          completed_at: null
+          cancelled_by: null
+          cancelled_at: null
+          cancel_reason: null
+          items:
+            - { id: 101, product_id: 1, sku: FZ-CHK-001, product_name: Ayam Fillet, unit: KARTON, expected_qty: 100, received_qty: 60, remaining_qty: 40 }
+            - { id: 102, product_id: 2, sku: FZ-SHR-002, product_name: Udang Kupas, unit: KARTON, expected_qty: 50, received_qty: 50, remaining_qty: 0 }
+            - { id: 103, product_id: 3, sku: FZ-BKS-003, product_name: Bakso Sapi, unit: KARTON, expected_qty: 20, received_qty: 0, remaining_qty: 20 }
+          receipts:
+            - id: 1
+              receipt_number: GR-20261026-000001
+              document_id: 15
+              notes: Truk B 1234 XY
+              received_by: { id: 2, full_name: Operator Satu }
+              received_at: '2026-10-26T03:15:00.000Z'
+              lines:
+                - { transaction_id: 1, item_id: 101, product_id: 1, sku: FZ-CHK-001, product_name: Ayam Fillet, quantity: 60, balance_after: 60 }
+                - { transaction_id: 2, item_id: 102, product_id: 2, sku: FZ-SHR-002, product_name: Udang Kupas, quantity: 50, balance_after: 50 }
+    DocumentCompleted:
+      summary: Dokumen COMPLETED setelah dua penerimaan (semua item penuh)
+      value:
+        data:
+          id: 15
+          doc_number: RCV-20261026-000015
+          supplier_name: PT Sumber Beku
+          expected_date: '2026-10-27'
+          notes: Kiriman mingguan
+          status: COMPLETED
+          created_by: { id: 2, full_name: Operator Satu }
+          created_at: '2026-10-26T01:00:00.000Z'
+          submitted_by: { id: 2, full_name: Operator Satu }
+          submitted_at: '2026-10-26T01:20:00.000Z'
+          completed_by: { id: 1, full_name: Supervisor Satu }
+          completed_at: '2026-10-27T08:00:00.000Z'
+          cancelled_by: null
+          cancelled_at: null
+          cancel_reason: null
+          items:
+            - { id: 101, product_id: 1, sku: FZ-CHK-001, product_name: Ayam Fillet, unit: KARTON, expected_qty: 100, received_qty: 100, remaining_qty: 0 }
+            - { id: 102, product_id: 2, sku: FZ-SHR-002, product_name: Udang Kupas, unit: KARTON, expected_qty: 50, received_qty: 50, remaining_qty: 0 }
+            - { id: 103, product_id: 3, sku: FZ-BKS-003, product_name: Bakso Sapi, unit: KARTON, expected_qty: 20, received_qty: 20, remaining_qty: 0 }
+          receipts:
+            - id: 1
+              receipt_number: GR-20261026-000001
+              document_id: 15
+              notes: Truk B 1234 XY
+              received_by: { id: 2, full_name: Operator Satu }
+              received_at: '2026-10-26T03:15:00.000Z'
+              lines:
+                - { transaction_id: 1, item_id: 101, product_id: 1, sku: FZ-CHK-001, product_name: Ayam Fillet, quantity: 60, balance_after: 60 }
+                - { transaction_id: 2, item_id: 102, product_id: 2, sku: FZ-SHR-002, product_name: Udang Kupas, quantity: 50, balance_after: 50 }
+            - id: 2
+              receipt_number: GR-20261027-000002
+              document_id: 15
+              notes: null
+              received_by: { id: 2, full_name: Operator Satu }
+              received_at: '2026-10-27T02:30:00.000Z'
+              lines:
+                - { transaction_id: 3, item_id: 101, product_id: 1, sku: FZ-CHK-001, product_name: Ayam Fillet, quantity: 40, balance_after: 100 }
+                - { transaction_id: 4, item_id: 103, product_id: 3, sku: FZ-BKS-003, product_name: Bakso Sapi, quantity: 20, balance_after: 20 }
+    DocumentCancelled:
+      summary: Dokumen dibatalkan saat OPEN
+      value:
+        data:
+          id: 16
+          doc_number: RCV-20261026-000016
+          supplier_name: CV Laut Segar
+          expected_date: '2026-10-28'
+          notes: null
+          status: CANCELLED
+          created_by: { id: 2, full_name: Operator Satu }
+          created_at: '2026-10-26T04:00:00.000Z'
+          submitted_by: { id: 2, full_name: Operator Satu }
+          submitted_at: '2026-10-26T04:10:00.000Z'
+          completed_by: null
+          completed_at: null
+          cancelled_by: { id: 1, full_name: Supervisor Satu }
+          cancelled_at: '2026-10-26T06:00:00.000Z'
+          cancel_reason: Supplier membatalkan kiriman
+          items:
+            - { id: 104, product_id: 2, sku: FZ-SHR-002, product_name: Udang Kupas, unit: KARTON, expected_qty: 30, received_qty: 0, remaining_qty: 30 }
+          receipts: []
+    ReceiptCreated:
+      summary: Receipt berisi 2 baris (Ayam 60, Udang 50)
+      value:
+        data:
+          id: 1
+          receipt_number: GR-20261026-000001
+          document_id: 15
+          notes: Truk B 1234 XY
+          received_by: { id: 2, full_name: Operator Satu }
+          received_at: '2026-10-26T03:15:00.000Z'
+          lines:
+            - { transaction_id: 1, item_id: 101, product_id: 1, sku: FZ-CHK-001, product_name: Ayam Fillet, quantity: 60, balance_after: 60 }
+            - { transaction_id: 2, item_id: 102, product_id: 2, sku: FZ-SHR-002, product_name: Udang Kupas, quantity: 50, balance_after: 50 }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code:
+              type: string
+              enum:
+                - VALIDATION_ERROR
+                - UNAUTHENTICATED
+                - INVALID_CREDENTIALS
+                - FORBIDDEN
+                - DOCUMENT_NOT_FOUND
+                - ITEM_NOT_FOUND
+                - SKU_ALREADY_EXISTS
+                - PRODUCT_ALREADY_IN_DOCUMENT
+                - INVALID_DOCUMENT_STATUS
+                - IDEMPOTENCY_KEY_CONFLICT
+                - PRODUCT_NOT_FOUND
+                - DOCUMENT_HAS_NO_ITEMS
+                - ITEM_NOT_IN_DOCUMENT
+                - QUANTITY_EXCEEDS_REMAINING
+                - DOCUMENT_NOT_FULLY_RECEIVED
+                - INTERNAL_ERROR
+            message: { type: string }
+            details:
+              type: array
+              description: |
+                Bentuk isi tergantung `code`:
+                - `VALIDATION_ERROR` → `FieldErrorDetail`
+                - `QUANTITY_EXCEEDS_REMAINING`, `ITEM_NOT_IN_DOCUMENT` → `LineErrorDetail`
+                - `DOCUMENT_NOT_FULLY_RECEIVED` → `ItemShortageDetail`
+                - kode lain → tidak ada `details`
+              items:
+                anyOf:
+                  - $ref: '#/components/schemas/FieldErrorDetail'
+                  - $ref: '#/components/schemas/LineErrorDetail'
+                  - $ref: '#/components/schemas/ItemShortageDetail'
+
+    FieldErrorDetail:
+      type: object
+      description: Satu field yang salah. Untuk array, indeks ditulis dengan titik, contoh `lines.0.quantity`
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string, example: lines.0.quantity }
+        message: { type: string }
+
+    LineErrorDetail:
+      type: object
+      description: |
+        Satu baris penerimaan yang salah. `line` adalah nomor baris di request (mulai dari 1).
+        `sku`, `remaining`, dan `requested` hanya ada untuk `QUANTITY_EXCEEDS_REMAINING`.
+      required: [line, item_id, message]
+      additionalProperties: false
+      properties:
+        line: { type: integer, minimum: 1 }
+        item_id: { type: integer }
+        sku: { type: string }
+        remaining: { type: integer, minimum: 0 }
+        requested: { type: integer, minimum: 1 }
+        message: { type: string }
+
+    ItemShortageDetail:
+      type: object
+      description: Satu item yang belum diterima penuh saat complete
+      required: [item_id, sku, expected_qty, received_qty, remaining_qty, message]
+      additionalProperties: false
+      properties:
+        item_id: { type: integer }
+        sku: { type: string }
+        expected_qty: { type: integer }
+        received_qty: { type: integer }
+        remaining_qty: { type: integer, minimum: 1 }
+        message: { type: string }
+
+    Pagination:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+        total_pages: { type: integer }
+
+    Health:
+      type: object
+      required: [status, database]
+      properties:
+        status: { type: string, enum: [ok, error] }
+        database: { type: string, enum: [ok, error] }
+
+    Role:
+      type: string
+      enum: [OPERATOR, SUPERVISOR]
+
+    User:
+      type: object
+      required: [id, username, full_name, role]
+      properties:
+        id: { type: integer }
+        username: { type: string }
+        full_name: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+
+    UserRef:
+      type: object
+      description: Rujukan singkat ke user. Selalu terisi
+      required: [id, full_name]
+      properties:
+        id: { type: integer }
+        full_name: { type: string }
+
+    NullableUserRef:
+      description: Rujukan ke user yang boleh kosong (`null`), misalnya `submitted_by` sebelum dokumen disubmit
+      anyOf:
+        - $ref: '#/components/schemas/UserRef'
+        - type: 'null'
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      additionalProperties: false
+      properties:
+        username: { type: string, minLength: 1, maxLength: 50 }
+        password: { type: string, minLength: 1, maxLength: 100 }
+
+    LoginResult:
+      type: object
+      required: [token, expires_at, user]
+      properties:
+        token: { type: string }
+        expires_at: { type: string, format: date-time }
+        user: { $ref: '#/components/schemas/User' }
+
+    Product:
+      type: object
+      required: [id, sku, name, unit, created_at]
+      properties:
+        id: { type: integer }
+        sku: { type: string, example: FZ-CHK-001 }
+        name: { type: string, example: Ayam Fillet }
+        unit: { type: string, example: KARTON }
+        created_at: { type: string, format: date-time }
+
+    ProductCreate:
+      type: object
+      required: [sku, name, unit]
+      additionalProperties: false
+      properties:
+        sku:
+          type: string
+          pattern: '^[A-Za-z0-9-]{3,50}$'
+          description: Dipangkas spasinya lalu diubah ke huruf besar sebelum disimpan. Pola berlaku setelah dipangkas
+        name: { type: string, minLength: 1, maxLength: 150 }
+        unit: { type: string, minLength: 1, maxLength: 20 }
+
+    DocumentStatus:
+      type: string
+      enum: [DRAFT, OPEN, IN_PROGRESS, COMPLETED, CANCELLED]
+
+    DocumentCreate:
+      type: object
+      required: [supplier_name, expected_date]
+      additionalProperties: false
+      properties:
+        supplier_name: { type: string, minLength: 1, maxLength: 150 }
+        expected_date: { type: string, format: date }
+        notes:
+          type: [string, 'null']
+          maxLength: 500
+          description: Teks kosong setelah dipangkas disimpan sebagai `null`
+
+    DocumentSummary:
+      type: object
+      required: [id, doc_number, supplier_name, expected_date, status, item_count, total_expected, total_received, created_at]
+      properties:
+        id: { type: integer }
+        doc_number: { type: string, example: RCV-20261026-000015 }
+        supplier_name: { type: string }
+        expected_date: { type: string, format: date }
+        status: { $ref: '#/components/schemas/DocumentStatus' }
+        item_count: { type: integer }
+        total_expected:
+          type: integer
+          description: Untuk progres (FR-22). Fitur tampilannya berprioritas Sebaiknya, tapi field ini tetap wajib karena query-nya murah
+        total_received:
+          type: integer
+          description: Untuk progres (FR-22), lihat `total_expected`
+        created_at: { type: string, format: date-time }
+
+    DocumentDetail:
+      type: object
+      required: [id, doc_number, supplier_name, expected_date, notes, status, created_by, created_at, submitted_by, submitted_at, completed_by, completed_at, cancelled_by, cancelled_at, cancel_reason, items, receipts]
+      properties:
+        id: { type: integer }
+        doc_number: { type: string }
+        supplier_name: { type: string }
+        expected_date: { type: string, format: date }
+        notes: { type: [string, 'null'] }
+        status: { $ref: '#/components/schemas/DocumentStatus' }
+        created_by: { $ref: '#/components/schemas/UserRef' }
+        created_at: { type: string, format: date-time }
+        submitted_by: { $ref: '#/components/schemas/NullableUserRef' }
+        submitted_at: { type: [string, 'null'], format: date-time }
+        completed_by: { $ref: '#/components/schemas/NullableUserRef' }
+        completed_at: { type: [string, 'null'], format: date-time }
+        cancelled_by: { $ref: '#/components/schemas/NullableUserRef' }
+        cancelled_at: { type: [string, 'null'], format: date-time }
+        cancel_reason: { type: [string, 'null'] }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }
+        receipts:
+          type: array
+          items: { $ref: '#/components/schemas/Receipt' }
+
+    Item:
+      type: object
+      required: [id, product_id, sku, product_name, unit, expected_qty, received_qty, remaining_qty]
+      properties:
+        id: { type: integer }
+        product_id: { type: integer }
+        sku: { type: string }
+        product_name: { type: string }
+        unit: { type: string }
+        expected_qty: { type: integer }
+        received_qty: { type: integer }
+        remaining_qty: { type: integer, description: expected_qty − received_qty }
+
+    ItemCreate:
+      type: object
+      required: [product_id, expected_qty]
+      additionalProperties: false
+      properties:
+        product_id: { type: integer, minimum: 1 }
+        expected_qty: { type: integer, minimum: 1, maximum: 1000000 }
+
+    ItemUpdate:
+      type: object
+      required: [expected_qty]
+      additionalProperties: false
+      properties:
+        expected_qty: { type: integer, minimum: 1, maximum: 1000000 }
+
+    ReceiptCreate:
+      type: object
+      required: [lines]
+      additionalProperties: false
+      properties:
+        notes:
+          type: [string, 'null']
+          maxLength: 500
+          description: Teks kosong setelah dipangkas disimpan sebagai `null`
+        lines:
+          type: array
+          minItems: 1
+          description: '`item_id` tidak boleh muncul dua kali'
+          items:
+            type: object
+            required: [item_id, quantity]
+            additionalProperties: false
+            properties:
+              item_id: { type: integer, minimum: 1 }
+              quantity: { type: integer, minimum: 1 }
+
+    Receipt:
+      type: object
+      required: [id, receipt_number, document_id, notes, received_by, received_at, lines]
+      properties:
+        id: { type: integer }
+        receipt_number: { type: string, example: GR-20261026-000001 }
+        document_id: { type: integer }
+        notes: { type: [string, 'null'] }
+        received_by: { $ref: '#/components/schemas/UserRef' }
+        received_at: { type: string, format: date-time }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [transaction_id, item_id, product_id, sku, product_name, quantity, balance_after]
+            properties:
+              transaction_id: { type: integer }
+              item_id: { type: integer }
+              product_id: { type: integer }
+              sku: { type: string }
+              product_name: { type: string }
+              quantity: { type: integer }
+              balance_after: { type: integer }
+
+    CancelRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500 }
+
+    InventoryBalance:
+      type: object
+      required: [product_id, sku, name, unit, on_hand_qty, updated_at]
+      properties:
+        product_id: { type: integer }
+        sku: { type: string }
+        name: { type: string }
+        unit: { type: string }
+        on_hand_qty: { type: integer }
+        updated_at: { type: string, format: date-time }
+
+    InventoryTransaction:
+      type: object
+      required: [id, created_at, product_id, sku, product_name, type, quantity, balance_after, receipt_number, doc_number, created_by]
+      properties:
+        id: { type: integer }
+        created_at: { type: string, format: date-time }
+        product_id: { type: integer }
+        sku: { type: string }
+        product_name: { type: string }
+        type: { type: string, enum: [RECEIPT] }
+        quantity: { type: integer }
+        balance_after: { type: integer }
+        receipt_number: { type: string }
+        doc_number: { type: string }
+        created_by: { $ref: '#/components/schemas/UserRef' }

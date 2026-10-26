@@ -1,0 +1,96 @@
+%% ERD Warehouse Receiving System. Penjelasan & DDL: technical-spec.md bagian 2–3
+
+erDiagram
+    users {
+        integer id PK
+        varchar username UK
+        varchar password_hash
+        varchar full_name
+        varchar role "OPERATOR | SUPERVISOR"
+        timestamptz created_at
+    }
+
+    products {
+        integer id PK
+        varchar sku UK "selalu huruf besar"
+        varchar name
+        varchar unit
+        integer created_by FK
+        timestamptz created_at
+    }
+
+    receiving_documents {
+        integer id PK
+        varchar doc_number UK "RCV-YYYYMMDD-NNNNNN"
+        varchar supplier_name
+        date expected_date
+        varchar notes
+        varchar status "DRAFT | OPEN | IN_PROGRESS | COMPLETED | CANCELLED"
+        integer created_by FK
+        timestamptz created_at
+        integer submitted_by FK "boleh kosong"
+        timestamptz submitted_at
+        integer completed_by FK "boleh kosong"
+        timestamptz completed_at "wajib jika COMPLETED"
+        integer cancelled_by FK "boleh kosong"
+        timestamptz cancelled_at
+        varchar cancel_reason "wajib jika CANCELLED"
+        timestamptz updated_at
+    }
+
+    receiving_items {
+        integer id PK
+        integer document_id FK
+        integer product_id FK
+        integer expected_qty "1 - 1.000.000"
+        integer received_qty "0 <= received_qty <= expected_qty"
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    receipts {
+        integer id PK
+        varchar receipt_number UK "GR-YYYYMMDD-NNNNNN"
+        integer document_id FK
+        varchar idempotency_key UK
+        char request_hash "SHA-256 isi request"
+        varchar notes
+        integer received_by FK
+        timestamptz received_at
+    }
+
+    inventory_balances {
+        integer product_id PK, FK
+        integer on_hand_qty ">= 0"
+        timestamptz updated_at
+    }
+
+    inventory_transactions {
+        integer id PK
+        integer product_id FK "harus sama dengan produk milik item"
+        varchar type "RECEIPT"
+        integer quantity "> 0"
+        integer balance_after ">= 0"
+        integer receipt_id FK
+        integer receiving_item_id FK "FK komposit bersama product_id"
+        integer created_by FK
+        timestamptz created_at
+    }
+
+    users ||--o{ products : "created_by"
+    users ||--o{ receiving_documents : "created_by"
+    users |o--o{ receiving_documents : "submitted_by"
+    users |o--o{ receiving_documents : "completed_by"
+    users |o--o{ receiving_documents : "cancelled_by"
+    users ||--o{ receipts : "received_by"
+    users ||--o{ inventory_transactions : "created_by"
+
+    receiving_documents ||--o{ receiving_items : "berisi"
+    products ||--o{ receiving_items : "direncanakan di"
+
+    receiving_documents ||--o{ receipts : "diterima lewat"
+    receipts ||--|{ inventory_transactions : "berisi baris, min. 1 (service)"
+    receiving_items ||--o{ inventory_transactions : "diterima lewat"
+
+    products ||--|| inventory_balances : "punya stok, dibuat bersama (service)"
+    products ||--o{ inventory_transactions : "riwayat stok"
