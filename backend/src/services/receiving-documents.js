@@ -104,17 +104,6 @@ export async function createDocument(
   return getDocument(rows[0].id);
 }
 
-export async function lockDocument(client, id) {
-  const { rows } = await client.query(
-    "SELECT id, status FROM receiving_documents WHERE id = $1 FOR UPDATE",
-    [id],
-  );
-  if (!rows[0]) {
-    throw new AppError("DOCUMENT_NOT_FOUND", `Dokumen ${id} tidak ditemukan.`);
-  }
-  return rows[0];
-}
-
 async function getItem(client, itemId) {
   const { rows } = await client.query(
     `SELECT i.id, i.product_id, p.sku, p.name AS product_name, p.unit,
