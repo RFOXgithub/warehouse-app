@@ -438,7 +438,8 @@ Spesifikasi lengkap (request, response, contoh) ada di [`openapi.yaml`](openapi.
 | Respons error | `{ "error": { "code", "message", "details": [ ... ] } }`. `details` opsional; bentuknya tergantung `code` (4.3) |
 | Tanggal | `expected_date` berformat `YYYY-MM-DD`; timestamp berformat ISO 8601 UTC |
 | Field kosong di respons | Semua field di skema respons **selalu dikirim**. Yang belum ada nilainya dikirim sebagai `null` (misalnya `submitted_by` saat DRAFT), bukan dihilangkan |
-| Teks di request | Dipangkas spasinya di awal/akhir **sebelum** divalidasi (`z.string().trim()`). `notes` yang kosong setelah dipangkas disimpan sebagai `null` |
+| Teks di request | Dipangkas spasinya di awal/akhir **sebelum** divalidasi (`z.string().trim()`), kecuali password. `notes` yang kosong setelah dipangkas disimpan sebagai `null` |
+| Body bukan JSON valid | 400 `VALIDATION_ERROR` dengan detail `{ "field": "(body)" }`, bukan 500 (helper `readJson()` di `lib/http.js`) |
 | Field tidak dikenal | **Ditolak** dengan 400 `VALIDATION_ERROR` (skema zod memakai `.strict()`). Contoh: `{"expected_quantity": 10}` (salah ketik) langsung ketahuan, bukan diabaikan diam-diam |
 | Parameter path | `{id}` dan `{itemId}` harus bilangan bulat positif (`z.coerce.number().int().positive()`). `abc`, `0`, `-5`, `1.5` → 400 `VALIDATION_ERROR` |
 | `operationId` | Setiap endpoint punya nama unik di `openapi.yaml` (misalnya `createReceipt`). Nama fungsi di `frontend/src/api/client.js` memakai nama yang sama |
@@ -799,7 +800,8 @@ Setiap transisi juga memperbarui `updated_at`.
 
 ### 8.1 Mekanisme
 
-- **Login:** `bcryptjs.compare` dengan `password_hash`. Gagal → 401 `INVALID_CREDENTIALS` dengan pesan yang sama, entah username atau password yang salah.
+- **Login:** `bcryptjs.compare` dengan `password_hash`. Gagal → 401 `INVALID_CREDENTIALS` dengan pesan yang sama, entah username atau password yang salah. Jika username tidak ada, `bcrypt.compare` tetap dijalankan terhadap hash palsu, supaya waktu respons sama dan penyerang tidak bisa menebak username mana yang terdaftar dari lamanya jawaban. Password **tidak** dipangkas spasinya (spasi bisa jadi bagian dari password).
+- **Verifikasi token:** `jwtVerify` dengan `algorithms: ['HS256']`, supaya token yang mengaku memakai algoritma lain (misalnya `none`) ditolak.
 - **Token:** JWT HS256 dibuat dengan `jose`. Isi: `sub` (user id), `username`, `full_name`, `role`. Berlaku 8 jam (`JWT_EXPIRES_IN`), kunci dari `JWT_SECRET`.
 - **Di setiap route (FR-02):** `const user = await requireUser(request, ['SUPERVISOR'])`. Fungsi ini melempar 401 jika token bermasalah, atau 403 jika role tidak ada di daftar. Tanpa daftar role berarti semua role yang login boleh.
 - **Frontend:** token disimpan di `localStorage` dan dikirim di header `Authorization`. Respons 401 → token dihapus dan pengguna diarahkan ke halaman login. Tombol disembunyikan berdasarkan `role`, tapi itu hanya untuk kenyamanan.

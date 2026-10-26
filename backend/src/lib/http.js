@@ -52,3 +52,16 @@ function toFieldErrors(issue) {
   }
   return [{ field: issue.path.join(".") || "(body)", message: issue.message }];
 }
+
+export async function readJson(request) {
+  try {
+    return await request.json();
+  } catch {
+    throw new AppError("VALIDATION_ERROR", "Data yang dikirim tidak valid.", [
+      {
+        field: "(body)",
+        message: "Body request harus berupa JSON yang valid.",
+      },
+    ]);
+  }
+}
