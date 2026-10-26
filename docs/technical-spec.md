@@ -106,10 +106,14 @@ Dengan pembagian ini, service bisa diuji tanpa HTTP, dan setiap aturan bisnis ha
 
 ### 1.5 Catatan khusus Next.js
 
-- Setiap `route.js` menulis `export const runtime = 'nodejs'`, karena `pg` butuh Node.js (tidak jalan di Edge runtime).
-- Setiap route GET menulis `export const dynamic = 'force-dynamic'`, supaya respons tidak di-cache.
-- Sejak Next.js 15, `params` adalah Promise: `const { id } = await params`.
-- Next.js tidak dipakai untuk halaman. Folder `app/` hanya berisi `api/`.
+Versi yang dipakai: **Next.js 16**. Aturan di bawah dicek terhadap dokumentasi bawaan di `backend/node_modules/next/dist/docs/`.
+
+- **Cache Components dimatikan.** Template Next.js 16 mengaktifkan `cacheComponents: true` (dan `partialPrefetching: true`) di `next.config.mjs`; keduanya dihapus. Alasannya: dengan Cache Components, `next build` mencoba *prerender* handler `GET` yang tidak membaca data request, misalnya `/api/health`, yang berarti mencoba terhubung ke database saat build, padahal database belum ada di tahap build Docker. API ini tidak membutuhkan cache.
+- **Tanpa Cache Components, route handler tidak di-cache** secara bawaan, jadi tidak perlu `export const dynamic = ...`.
+- **Runtime bawaan sudah Node.js** (Edge runtime sudah *deprecated*), jadi tidak perlu `export const runtime = 'nodejs'`. `pg` butuh Node.js, dan itu sudah terpenuhi.
+- `params` adalah Promise: `const { id } = await params`.
+- Next.js tidak dipakai untuk halaman. Folder `app/` hanya berisi `api/` dan `layout.js` minimal (root layout tetap dibutuhkan untuk halaman 404 bawaan Next.js).
+- `next dev` membuat `backend/AGENTS.md` (instruksi Next.js untuk AI agent). File ini dibuat ulang otomatis dan diabaikan oleh `.gitignore`.
 
 ## 2. ERD
 
