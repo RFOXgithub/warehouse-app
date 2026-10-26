@@ -1,6 +1,7 @@
 import { query, withTransaction } from "../lib/db.js";
 import { AppError } from "../lib/errors.js";
 import { listReceiptsByDocument } from "./receipts.js";
+import { lockDocument, assertStatusAllows } from "./document-rules.js";
 
 function userRef(id, fullName) {
   return id === null ? null : { id, full_name: fullName };
@@ -103,22 +104,6 @@ export async function createDocument(
   return getDocument(rows[0].id);
 }
 
-const ALLOWED_STATUSES = {
-  editItem: ["DRAFT"],
-  submit: ["DRAFT"],
-  receive: ["OPEN", "IN_PROGRESS"],
-  complete: ["IN_PROGRESS"],
-  cancel: ["DRAFT", "OPEN"],
-};
-
-const ACTION_LABELS = {
-  editItem: "mengubah item",
-  submit: "submit",
-  receive: "mencatat penerimaan",
-  complete: "menyelesaikan",
-  cancel: "membatalkan",
-};
-
 export async function lockDocument(client, id) {
   const { rows } = await client.query(
     "SELECT id, status FROM receiving_documents WHERE id = $1 FOR UPDATE",
@@ -128,17 +113,6 @@ export async function lockDocument(client, id) {
     throw new AppError("DOCUMENT_NOT_FOUND", `Dokumen ${id} tidak ditemukan.`);
   }
   return rows[0];
-}
-
-export function assertStatusAllows(document, action) {
-  const allowed = ALLOWED_STATUSES[action];
-  if (!allowed.includes(document.status)) {
-    throw new AppError(
-      "INVALID_DOCUMENT_STATUS",
-      `Tidak bisa ${ACTION_LABELS[action]} dokumen berstatus ${document.status}. ` +
-        `Aksi ini hanya bisa saat dokumen berstatus ${allowed.join(" atau ")}.`,
-    );
-  }
 }
 
 async function getItem(client, itemId) {
@@ -268,6 +242,41 @@ export async function cancelDocument(documentId, { reason }, user) {
            cancel_reason = $2, updated_at = now()
        WHERE id = $3`,
       [user.id, reason, documentId],
+    );
+  });
+  return getDocument(documentId);
+}
+
+export async function completeDocument(documentId, user) {
+  await withTransaction(async (client) => {
+    const document = await lockDocument(client, documentId);
+    assertStatusAllows(document, "complete");
+
+    const { rows: shortages } = await client.query(
+      `SELECT i.id AS item_id, p.sku, p.name, i.expected_qty, i.received_qty,
+              i.expected_qty - i.received_qty AS remaining_qty
+       FROM receiving_items i
+       JOIN products p ON p.id = i.product_id
+       WHERE i.document_id = $1 AND i.received_qty < i.expected_qty
+       ORDER BY i.id`,
+      [documentId],
+    );
+    if (shortages.length > 0) {
+      throw new AppError(
+        "DOCUMENT_NOT_FULLY_RECEIVED",
+        `Masih ada ${shortages.length} item yang belum diterima penuh.`,
+        shortages.map(({ name, ...shortage }) => ({
+          ...shortage,
+          message: `${name}: kurang ${shortage.remaining_qty}.`,
+        })),
+      );
+    }
+
+    await client.query(
+      `UPDATE receiving_documents
+       SET status = 'COMPLETED', completed_by = $1, completed_at = now(), updated_at = now()
+       WHERE id = $2`,
+      [user.id, documentId],
     );
   });
   return getDocument(documentId);

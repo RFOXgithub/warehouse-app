@@ -64,6 +64,7 @@ Semua kode memakai **JavaScript** (ES Modules). Versi persis dikunci di `package
 │  │  ├─ validators/             ← skema zod per fitur
 │  │  └─ services/               ← ATURAN BISNIS + query SQL
 │  │     ├─ products.js
+│  │     ├─ document-rules.js      ← lockDocument() + aturan status (dipakai dokumen & receipt)
 │  │     ├─ receiving-documents.js
 │  │     ├─ receipts.js
 │  │     └─ inventory.js
@@ -775,7 +776,7 @@ stateDiagram-v2
     CANCELLED --> [*]
 ```
 
-Di kode, transisi ditulis sebagai satu objek di `services/receiving-documents.js`, supaya aturannya hanya ada di satu tempat:
+Di kode, transisi ditulis sebagai satu objek di `services/document-rules.js`, supaya aturannya hanya ada di satu tempat. File ini dipisah dari `receiving-documents.js` karena dipakai juga oleh `receipts.js`; jika ditaruh di `receiving-documents.js`, kedua file service akan saling meng-import (*circular import*):
 
 ```js
 const ALLOWED = {
@@ -869,7 +870,8 @@ Strategi ini memenuhi NFR-11: setiap aturan bisnis BR-01 s.d. BR-09 dan setiap p
   ```
 
   Helper `callRoute()` di `tests/helpers/http.js` membungkus pola ini supaya test lebih ringkas. Helper `tokenFor('operator1')` di `tests/helpers/db.js` menghasilkan token login untuk user seed; password user seed di test ditetapkan oleh test sendiri, bukan dari `.env`.
-- Untuk test bersamaan (`Promise.all`), dua pemanggilan memakai koneksi berbeda dari Pool (default maksimal 10 koneksi), jadi kunci baris benar-benar diuji.
+- **Test bersamaan harus dibuat pasti bertabrakan.** `Promise.all` saja tidak cukup: dalam percobaan, request kedua menunggu koneksi database baru dibuat, sehingga request pertama sudah selesai lebih dulu, dan test tetap lolos walaupun `FOR UPDATE` dihapus. Helper `runWhileDocumentsLocked()` di `tests/helpers/concurrency.js` memperbaikinya: koneksi "penghalang" mengunci dokumen dulu, semua request dijalankan dan antre, lalu kunci dilepas sekaligus. Helper juga mengembalikan `settledWhileLocked` (harus 0), sebagai bukti bahwa request benar-benar menunggu kunci.
+- **Test konkurensi sudah dibuktikan bisa gagal (uji mutasi):** tanpa `FOR UPDATE`, test BR-08 gagal dengan pelanggaran `chk_received_not_exceed_expected`; tanpa pengurutan `product_id`, test deadlock gagal dengan `deadlock detected`; jika cek idempotency dipindah setelah cek status, test "request ulang setelah COMPLETED" gagal.
 - Helper `assertInventoryConsistent()` dipanggil di akhir setiap test penerimaan. Helper ini mengecek empat hal:
   1. Untuk setiap produk: `SUM(inventory_transactions.quantity) = inventory_balances.on_hand_qty` (BR-09).
   2. Untuk setiap item: `received_qty = SUM` transaksi untuk item itu.
