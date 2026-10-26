@@ -14,6 +14,7 @@ import { useAuth } from "@/composables/useAuth.js";
 import { fieldErrors } from "@/utils/errors.js";
 import { formatDate, formatDateTime, formatNumber } from "@/utils/format.js";
 import StatusBadge from "@/components/StatusBadge.vue";
+import ReceiptForm from "@/components/ReceiptForm.vue";
 
 const props = defineProps({ id: { type: String, required: true } });
 const { isSupervisor } = useAuth();
@@ -179,6 +180,19 @@ async function handleCancel() {
     showCancelForm.value = false;
     cancelReason.value = "";
   }
+}
+
+const canReceive = computed(() =>
+  ["OPEN", "IN_PROGRESS"].includes(doc.value?.status),
+);
+
+async function handleReceived({ receipt, replayed }) {
+  await loadDocument();
+  actionError.value = "";
+  actionDetails.value = [];
+  actionSuccess.value = replayed
+    ? `Penerimaan ini sudah tercatat sebelumnya sebagai ${receipt.receipt_number}. Stok tidak ditambah lagi.`
+    : `Penerimaan ${receipt.receipt_number} tersimpan. Stok sudah diperbarui.`;
 }
 </script>
 
@@ -478,7 +492,13 @@ async function handleCancel() {
           </button>
         </form>
       </section>
-
+      <ReceiptForm
+        v-if="canReceive"
+        :document-id="doc.id"
+        :items="doc.items"
+        @received="handleReceived"
+        @refresh="loadDocument"
+      />
       <section class="space-y-2">
         <h2 class="font-medium">Riwayat Penerimaan</h2>
         <p v-if="doc.receipts.length === 0" class="text-sm text-slate-500">
