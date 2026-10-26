@@ -40,3 +40,7 @@ export async function closePool() {
     globalThis.pgPool = undefined;
   }
 }
+
+export function escapeLike(text) {
+  return text.replace(/[\\%_]/g, (char) => "\\" + char);
+}

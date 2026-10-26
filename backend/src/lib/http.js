@@ -65,3 +65,15 @@ export async function readJson(request) {
     ]);
   }
 }
+
+export function paginated(data, { page, pageSize, total }) {
+  return Response.json({
+    data,
+    pagination: {
+      page,
+      page_size: pageSize,
+      total,
+      total_pages: Math.ceil(total / pageSize),
+    },
+  });
+}
