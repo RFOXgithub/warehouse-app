@@ -840,8 +840,10 @@ Strategi ini memenuhi NFR-11: setiap aturan bisnis BR-01 s.d. BR-09 dan setiap p
 
 **Konfigurasi Vitest (`vitest.config.js`):**
 - Baris pertama: `process.loadEnvFile('.env.local')` (fitur bawaan Node.js 22) untuk memuat `TEST_DATABASE_URL`.
-- `setupFiles: ['tests/setup/env.js']`: mengisi `process.env.DATABASE_URL` dengan nilai `TEST_DATABASE_URL`, dan mengisi `JWT_SECRET` dengan nilai khusus test. File ini berjalan **sebelum** file test meng-import kode backend, jadi koneksi otomatis mengarah ke database test.
-- `globalSetup: 'tests/setup/global-setup.js'`: menjalankan migrasi ke `warehouse_test` satu kali sebelum semua test.
+- `tests/setup/test-env.js` berisi `useTestEnv()`: mengisi `process.env.DATABASE_URL` dengan nilai `TEST_DATABASE_URL`, dan `JWT_SECRET` dengan nilai khusus test. **Pengaman:** jika nama database tidak berakhiran `_test`, test dihentikan sebelum menyentuh data, supaya `TRUNCATE` tidak pernah mengenai database development.
+- `setupFiles: ['tests/setup/env.js', 'tests/setup/hooks.js']`: `env.js` memanggil `useTestEnv()` **sebelum** file test meng-import kode backend; `hooks.js` mendaftarkan `beforeEach(resetDatabase)` dan `afterAll(closePool)` untuk semua file test.
+- `globalSetup: 'tests/setup/global-setup.js'`: memanggil `useTestEnv()` lalu menjalankan migrasi ke `warehouse_test` satu kali sebelum semua test.
+- Versi yang dipakai: **Vitest 5** (butuh Node.js ≥ 22.12).
 - `fileParallelism: false`: test berjalan berurutan karena semuanya memakai satu database.
 
 **Setiap test:**
@@ -866,7 +868,7 @@ Strategi ini memenuhi NFR-11: setiap aturan bisnis BR-01 s.d. BR-09 dan setiap p
   expect(res.status).toBe(201);
   ```
 
-  Helper `callRoute()` di `tests/helpers/` membungkus pola ini supaya test lebih ringkas.
+  Helper `callRoute()` di `tests/helpers/http.js` membungkus pola ini supaya test lebih ringkas. Helper `tokenFor('operator1')` di `tests/helpers/db.js` menghasilkan token login untuk user seed; password user seed di test ditetapkan oleh test sendiri, bukan dari `.env`.
 - Untuk test bersamaan (`Promise.all`), dua pemanggilan memakai koneksi berbeda dari Pool (default maksimal 10 koneksi), jadi kunci baris benar-benar diuji.
 - Helper `assertInventoryConsistent()` dipanggil di akhir setiap test penerimaan. Helper ini mengecek empat hal:
   1. Untuk setiap produk: `SUM(inventory_transactions.quantity) = inventory_balances.on_hand_qty` (BR-09).
