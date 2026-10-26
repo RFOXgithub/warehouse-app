@@ -1030,4 +1030,5 @@ Saat development, backend membaca `backend/.env.local`:
 - Tidak ada rate limiting pada login.
 - Seed tidak mengubah user yang sudah ada. Mengganti password seed di `.env` butuh reset database (`docker compose down -v`).
 - Database `warehouse_test` hanya dibuat otomatis pada volume baru (lihat 9.2).
+- Image Docker backend sekitar 900 MB, sebagian besar dari paket `next` dan binary `@next/swc`. Bisa diperkecil dengan `output: "standalone"`, tetapi perintah start dan isi image jadi lebih rumit, jadi tidak dipakai.
 - Satu baris saldo per produk bisa menjadi titik antre jika sangat banyak penerimaan bersamaan untuk produk yang sama. Ini tidak relevan pada skala gudang ini.
