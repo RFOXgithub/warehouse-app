@@ -1,8 +1,8 @@
 # Warehouse Receiving System
 
-Aplikasi web untuk gudang: mencatat **rencana penerimaan barang**, mencatat **barang yang benar-benar datang** (boleh bertahap, beberapa truk), dan **memperbarui stok secara otomatis** beserta riwayat transaksinya.
+Aplikasi web untuk gudang: mencatat **rencana penerimaan barang**, mencatat **barang yang benar-benar datang** (boleh bertahap, beberapa truk), dan **memperbarui stok secara otomatis** beserta riwayat transaksinya...
 
-Dikerjakan secara _specification-driven_ dengan AI coding agent. Dokumen di `docs/` adalah input utama implementasi, bukan prompt.
+Dikerjakan secara, _specification-driven_ dengan AI coding agent. Dokumen di `docs/` adalah input utama implementasi, bukan promp.
 
 | Kebutuhan                                             | Di mana                                                                                                                                |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
