@@ -3,6 +3,9 @@ import { onMounted } from "vue";
 import { listInventory } from "@/api/client.js";
 import { usePagedList } from "@/composables/usePagedList.js";
 import { formatDateTime, formatNumber } from "@/utils/format.js";
+import AppPageTabs from "@/components/layout/AppPageTabs.vue";
+import AppNavIcon from "@/components/layout/AppNavIcon.vue";
+import BaseAlert from "@/components/base/BaseAlert.vue";
 import PaginationBar from "@/components/PaginationBar.vue";
 
 const { rows, pagination, loading, errorMessage, load } = usePagedList((page) =>
@@ -13,59 +16,60 @@ onMounted(() => load(1));
 </script>
 
 <template>
-  <div class="space-y-4">
-    <h1 class="text-xl font-semibold">Stok</h1>
-    <p class="text-sm text-slate-500">
-      Stok hanya berubah lewat penerimaan barang dan tidak bisa diubah manual.
-    </p>
+  <div class="space-y-5">
+    <AppPageTabs />
 
-    <p
-      v-if="errorMessage"
-      role="alert"
-      class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"
-    >
-      {{ errorMessage }}
-    </p>
+    <div class="rounded-2xl border border-ledger-tint/70 bg-ledger-wash p-4 sm:rounded-3xl sm:p-6">
+      <div class="flex items-start gap-3">
+        <span class="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white text-ledger-blue shadow-sm">
+          <AppNavIcon name="archive" />
+        </span>
+        <div>
+          <h2 class="text-lg font-bold text-gray-900">Stok</h2>
+          <p class="text-sm text-gray-500">
+            Stok hanya berubah lewat penerimaan barang dan tidak bisa diubah manual.
+          </p>
+        </div>
+      </div>
 
-    <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-      <table class="w-full text-left text-sm">
-        <thead class="bg-slate-50 text-slate-600">
-          <tr>
-            <th class="px-4 py-2 font-medium">SKU</th>
-            <th class="px-4 py-2 font-medium">Nama</th>
-            <th class="px-4 py-2 text-right font-medium">Stok</th>
-            <th class="px-4 py-2 font-medium">Satuan</th>
-            <th class="px-4 py-2 font-medium">Terakhir diperbarui</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="row in rows"
-            :key="row.product_id"
-            class="border-t border-slate-100"
-          >
-            <td class="px-4 py-2 font-mono">{{ row.sku }}</td>
-            <td class="px-4 py-2">{{ row.name }}</td>
-            <td
-              class="px-4 py-2 text-right font-medium tabular-nums"
-              :class="row.on_hand_qty === 0 ? 'text-slate-400' : ''"
+      <BaseAlert v-if="errorMessage" variant="error" class="mt-4">{{ errorMessage }}</BaseAlert>
+
+      <div class="mt-5 overflow-x-auto rounded-2xl border border-gray-100 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="text-gray-500">
+            <tr class="border-b border-gray-100">
+              <th class="px-5 py-3 font-medium">SKU</th>
+              <th class="px-5 py-3 font-medium">Nama</th>
+              <th class="px-5 py-3 font-medium">Stok</th>
+              <th class="px-5 py-3 font-medium">Satuan</th>
+              <th class="px-5 py-3 font-medium">Terakhir diperbarui</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in rows"
+              :key="row.product_id"
+              class="border-b border-gray-50 last:border-0 hover:bg-gray-50/60"
             >
-              {{ formatNumber(row.on_hand_qty) }}
-            </td>
-            <td class="px-4 py-2">{{ row.unit }}</td>
-            <td class="px-4 py-2 text-slate-500">
-              {{ formatDateTime(row.updated_at) }}
-            </td>
-          </tr>
-          <tr v-if="!loading && rows.length === 0">
-            <td colspan="5" class="px-4 py-6 text-center text-slate-500">
-              Belum ada produk.
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+              <td class="px-5 py-4 font-mono font-medium text-gray-900">{{ row.sku }}</td>
+              <td class="px-5 py-4 text-gray-700">{{ row.name }}</td>
+              <td
+                class="px-5 py-4 font-semibold tabular-nums"
+                :class="row.on_hand_qty === 0 ? 'text-gray-400' : 'text-gray-900'"
+              >
+                {{ formatNumber(row.on_hand_qty) }}
+              </td>
+              <td class="px-5 py-4 text-gray-700">{{ row.unit }}</td>
+              <td class="px-5 py-4 text-gray-500">{{ formatDateTime(row.updated_at) }}</td>
+            </tr>
+            <tr v-if="!loading && rows.length === 0">
+              <td colspan="5" class="px-5 py-10 text-center text-gray-400">Belum ada produk.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-    <PaginationBar :pagination="pagination" @change="load" />
+      <PaginationBar class="mt-4" :pagination="pagination" @change="load" />
+    </div>
   </div>
 </template>
