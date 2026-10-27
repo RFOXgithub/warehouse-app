@@ -1,1 +1,50 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --ease-fluid: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --color-ledger-blue: #1565c7;
+  --color-ledger-blue-deep: #0f4a96;
+  --color-ledger-tint: #dbe9fb;
+  --color-ledger-wash: #eef5fc;
+  --color-ledger-highlight: #bcdaf5;
+  --color-ledger-night-ink: #04183f;
+  --color-signal-sky: #1565c7;
+  --color-brand-silver: #b4b4b4;
+  --color-brand-amber: #e0ac18;
+  --color-brand-sky: #1565c7;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  [tabindex="-1"]:focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  body {
+    background-color: var(--color-gray-50);
+  }
+
+  ::selection {
+    background-color: var(--color-ledger-highlight);
+    color: var(--color-ledger-night-ink);
+  }
+}
+
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--color-signal-sky);
+    outline-offset: 2px;
+  }
+}
